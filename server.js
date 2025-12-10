@@ -19,6 +19,94 @@ let templateData = null; // Store template info
 let oldDataStore = []; // Store old/messy data
 let templateRows = []; // Store all template rows for searching
 
+// Utility function to convert Excel serial date to proper date
+// Excel dates are days since January 1, 1900
+function parseExcelDate(excelSerialDate) {
+  const serialNum = parseFloat(excelSerialDate);
+  if (isNaN(serialNum) || serialNum < 0 || serialNum > 100000) return null;
+  
+  // Excel serial date epoch is January 1, 1900
+  // Days since Dec 30, 1899 (Excel epoch)
+  const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+  const daysOffset = serialNum - 1;
+  
+  const resultDate = new Date(excelEpoch.getTime() + daysOffset * 24 * 60 * 60 * 1000);
+  
+  // Validate year is reasonable
+  if (resultDate.getFullYear() < 1900 || resultDate.getFullYear() > 2100) return null;
+  
+  // Format as YYYY-MM-DD HH:MM:SS
+  const year = resultDate.getFullYear();
+  const month = String(resultDate.getMonth() + 1).padStart(2, '0');
+  const day = String(resultDate.getDate()).padStart(2, '0');
+  const hours = String(resultDate.getHours()).padStart(2, '0');
+  const minutes = String(resultDate.getMinutes()).padStart(2, '0');
+  const seconds = String(resultDate.getSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+// Utility function to parse dates only in specific date columns
+// Only parse if column name contains 'date', 'time', or matches special format
+function parseDateFormat(dateStr, columnName = '') {
+  if (!dateStr || typeof dateStr !== 'string') return dateStr;
+  
+  dateStr = dateStr.trim();
+  if (!dateStr) return dateStr;
+  
+  // Check if this is a known date column
+  const isDateColumn = columnName.toLowerCase().includes('date') || 
+                       columnName.toLowerCase().includes('time') ||
+                       columnName.toLowerCase().includes('created') ||
+                       columnName.toLowerCase().includes('updated');
+  
+  // Try special time format "HH:MM.S" first (always parse this)
+  const timeMatch = dateStr.match(/^(\d{1,2}):(\d{2})\.(\d+)$/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1], 10);
+    const minutes = parseInt(timeMatch[2], 10);
+    const secondsDecimal = timeMatch[3];
+    
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      const seconds = secondsDecimal.length === 1 
+        ? parseInt(secondsDecimal) * 10 
+        : parseInt(secondsDecimal);
+      
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      
+      const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(Math.min(seconds, 59)).padStart(2, '0')}`;
+      return `${year}-${month}-${day} ${timeStr}`;
+    }
+  }
+  
+  // Only parse numbers as Excel dates if it's a known date column
+  if (isDateColumn && /^\d+(\.\d+)?$/.test(dateStr)) {
+    const parsed = parseExcelDate(dateStr);
+    if (parsed) return parsed;
+  }
+  
+  // Try parsing as JavaScript Date (only for known date columns)
+  if (isDateColumn) {
+    const dateObj = new Date(dateStr);
+    if (!isNaN(dateObj.getTime()) && dateObj.getFullYear() > 1900 && dateObj.getFullYear() < 2100) {
+      const year = dateObj.getFullYear();
+      const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dateObj.getDate()).padStart(2, '0');
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const seconds = String(dateObj.getSeconds()).padStart(2, '0');
+      
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
+  }
+  
+  // Return as-is if not a date
+  return dateStr;
+}
+
 // Serve frontend static files from /public
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -92,7 +180,23 @@ app.post('/api/reconcile/old', upload.single('file'), (req, res) => {
     if (!firstSheetName) return res.status(400).json({ error: 'No sheets in workbook' });
 
     const sheet = workbook.Sheets[firstSheetName];
-    const json = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+    
+    // Get all headers from first row (A1, B1, C1, etc.)
+    const headers = [];
+    let col = 0;
+    while (true) {
+      const cellRef = xlsx.utils.encode_col(col) + '1';
+      const cell = sheet[cellRef];
+      if (!cell) break;
+      headers.push(cell.v || '');
+      col++;
+    }
+    
+    // Convert to JSON with all headers preserved
+    const json = xlsx.utils.sheet_to_json(sheet, { 
+      defval: '',
+      header: headers.length > 0 ? headers : undefined
+    });
 
     oldDataStore = json.map((row, idx) => ({ 
       ...row, 
@@ -118,7 +222,23 @@ app.post('/api/reconcile/template', upload.single('file'), (req, res) => {
     if (!firstSheetName) return res.status(400).json({ error: 'No sheets in workbook' });
 
     const sheet = workbook.Sheets[firstSheetName];
-    const json = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+    
+    // Get all headers from first row (A1, B1, C1, etc.)
+    const headers = [];
+    let col = 0;
+    while (true) {
+      const cellRef = xlsx.utils.encode_col(col) + '1';
+      const cell = sheet[cellRef];
+      if (!cell) break;
+      headers.push(cell.v || '');
+      col++;
+    }
+    
+    // Convert to JSON with all headers preserved
+    const json = xlsx.utils.sheet_to_json(sheet, { 
+      defval: '',
+      header: headers.length > 0 ? headers : undefined
+    });
 
     // Add PK column if not present (use index as PK)
     templateRows = json.map((row, idx) => ({
@@ -315,7 +435,11 @@ app.post('/api/reconcile/init-db', express.json(), async (req, res) => {
 
     let insertedCount = 0;
     for (const row of dataToInsert) {
-      const values = columns.map(col => row[col] ?? null);
+      const values = columns.map(col => {
+        const val = row[col] ?? null;
+        // Parse special date format in any column
+        return parseDateFormat(val, col);
+      });
       const query = `INSERT INTO "${tableName}" (${columnsStr}) VALUES (${placeholders}) RETURNING *`;
       
       try {
@@ -670,7 +794,11 @@ app.post('/api/quick-upload', express.json(), async (req, res) => {
 
     let insertedCount = 0;
     for (const row of data) {
-      const values = columns.map(col => String(row[col] ?? '').trim() || null);
+      const values = columns.map(col => {
+        const val = String(row[col] ?? '').trim() || null;
+        // Parse special date format in any column
+        return parseDateFormat(val, col);
+      });
       const query = `INSERT INTO "${tableName}" (${columnsStr}) VALUES (${placeholders})`;
       
       try {
