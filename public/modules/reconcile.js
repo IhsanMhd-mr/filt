@@ -70,6 +70,28 @@ export async function renderReconcile() {
         <div id="matchingArea" style="display:none">
           <h3>Step 3: Match Records</h3>
           <p>For each record, search and select a matching template row. FK updates live in the database.</p>
+          
+          <div id="reconcileSortControls" style="display:none;padding:12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-bottom:16px">
+            <h4 style="margin-top:0">Sort Data</h4>
+            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div>
+                <label style="display:block;margin-bottom:6px"><strong>Sort By:</strong></label>
+                <select id="reconcileSortColumn" style="padding:8px;border:1px solid #ddd;border-radius:4px;min-width:150px">
+                  <option value="">-- Select column --</option>
+                </select>
+              </div>
+              <div>
+                <label style="display:block;margin-bottom:6px"><strong>Order:</strong></label>
+                <select id="reconcileSortOrder" style="padding:8px;border:1px solid #ddd;border-radius:4px">
+                  <option value="asc">Ascending (A → Z, 1 → 9)</option>
+                  <option value="desc">Descending (Z → A, 9 → 1)</option>
+                </select>
+              </div>
+              <button type="button" id="applySortReconcileBtn" class="btn primary">Apply Sort</button>
+              <button type="button" id="resetSortReconcileBtn" class="btn">Reset</button>
+            </div>
+          </div>
+
           <div id="reconcileTableArea" style="display:none">
             <div id="tableContainer" style="overflow-x:auto"></div>
             
@@ -147,6 +169,11 @@ export async function renderReconcile() {
   const rowMsg = document.getElementById('rowMsg');
   const noTableMsg = document.getElementById('noTableMsg');
   const matchingArea = document.getElementById('matchingArea');
+  const reconcileSortControls = document.getElementById('reconcileSortControls');
+  const reconcileSortColumn = document.getElementById('reconcileSortColumn');
+  const reconcileSortOrder = document.getElementById('reconcileSortOrder');
+  const applySortReconcileBtn = document.getElementById('applySortReconcileBtn');
+  const resetSortReconcileBtn = document.getElementById('resetSortReconcileBtn');
   const reconcileTableArea = document.getElementById('reconcileTableArea');
   const tableContainer = document.getElementById('tableContainer');
   const dbTableName = document.getElementById('dbTableName');
@@ -161,6 +188,7 @@ export async function renderReconcile() {
   const removeColumnBtn = document.getElementById('removeColumnBtn');
   const removeColumnSelect = document.getElementById('removeColumnSelect');
   const removeColumnMsg = document.getElementById('removeColumnMsg');
+  let originalOldRows = []; // For reset functionality
 
   // Load available tables
   async function loadAvailableTables() {
@@ -522,9 +550,22 @@ export async function renderReconcile() {
     matchingArea.style.display = 'block';
     reconcileTableArea.style.display = 'block';
     
+    // Save original data for reset
+    originalOldRows = JSON.parse(JSON.stringify(oldRows));
+    
     const oldColumns = oldRows.length > 0 ? Object.keys(oldRows[0]).filter(k => !k.startsWith('_')) : [];
     // Filter out only system columns, keep FK as a regular data column
     const filteredColumns = oldColumns.filter(k => k !== 'id' && k !== 'created_at');
+    
+    // Populate sort column dropdown
+    reconcileSortColumn.innerHTML = '<option value="">-- Select column --</option>';
+    filteredColumns.forEach(col => {
+      const opt = document.createElement('option');
+      opt.value = col;
+      opt.textContent = col;
+      reconcileSortColumn.appendChild(opt);
+    });
+    reconcileSortControls.style.display = 'block';
     
     let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
@@ -953,6 +994,55 @@ export async function renderReconcile() {
       saveMsg.textContent = 'Download error';
       saveMsg.style.color = 'red';
     }
+  });
+
+  // Reconcile table sorting
+  applySortReconcileBtn.addEventListener('click', () => {
+    const column = reconcileSortColumn.value;
+    const order = reconcileSortOrder.value;
+
+    if (!column) {
+      uploadMsg.textContent = 'Please select a column to sort by';
+      uploadMsg.style.color = 'orange';
+      return;
+    }
+
+    // Create sorted copy of data
+    const sorted = JSON.parse(JSON.stringify(oldRows));
+    
+    sorted.sort((a, b) => {
+      let valA = String(a[column] ?? '').trim().toLowerCase();
+      let valB = String(b[column] ?? '').trim().toLowerCase();
+
+      // Try numeric comparison if both look like numbers
+      const numA = parseFloat(valA);
+      const numB = parseFloat(valB);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return order === 'asc' ? numA - numB : numB - numA;
+      }
+
+      // String comparison
+      if (order === 'asc') {
+        return valA.localeCompare(valB);
+      } else {
+        return valB.localeCompare(valA);
+      }
+    });
+
+    oldRows = sorted;
+    showReconcileTable(loadedTable);
+    uploadMsg.textContent = `✓ Sorted by "${column}" (${order === 'asc' ? 'Ascending' : 'Descending'})`;
+    uploadMsg.style.color = 'green';
+  });
+
+  // Reset reconcile table sorting
+  resetSortReconcileBtn.addEventListener('click', () => {
+    oldRows = JSON.parse(JSON.stringify(originalOldRows));
+    reconcileSortColumn.value = '';
+    reconcileSortOrder.value = 'asc';
+    showReconcileTable(loadedTable);
+    uploadMsg.textContent = '✓ Sorting reset to original order';
+    uploadMsg.style.color = 'green';
   });
 
   // JSON download handlers

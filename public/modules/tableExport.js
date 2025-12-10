@@ -21,6 +21,28 @@ export async function renderTableExport() {
         </div>
         <div id="exportMsg" style="margin-top:8px;font-weight:bold"></div>
       </div>
+
+      <div id="sortingControls" style="display:none;padding:12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-bottom:16px">
+        <h4 style="margin-top:0">Sort Data</h4>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <label style="display:block;margin-bottom:6px"><strong>Sort By:</strong></label>
+            <select id="sortColumn" style="padding:8px;border:1px solid #ddd;border-radius:4px;min-width:150px">
+              <option value="">-- Select column --</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;margin-bottom:6px"><strong>Order:</strong></label>
+            <select id="sortOrder" style="padding:8px;border:1px solid #ddd;border-radius:4px">
+              <option value="asc">Ascending (A → Z, 1 → 9)</option>
+              <option value="desc">Descending (Z → A, 9 → 1)</option>
+            </select>
+          </div>
+          <button id="applySortBtn" class="btn primary">Apply Sort</button>
+          <button id="resetSortBtn" class="btn">Reset</button>
+        </div>
+      </div>
+
       <div id="tableArea">Select a table to view and export its contents</div>
     </section>
   `;
@@ -30,7 +52,13 @@ export async function renderTableExport() {
   const loadExportTableBtn = document.getElementById('loadExportTableBtn');
   const exportTableBtn = document.getElementById('exportTableBtn');
   const exportMsg = document.getElementById('exportMsg');
+  const sortingControls = document.getElementById('sortingControls');
+  const sortColumn = document.getElementById('sortColumn');
+  const sortOrder = document.getElementById('sortOrder');
+  const applySortBtn = document.getElementById('applySortBtn');
+  const resetSortBtn = document.getElementById('resetSortBtn');
   let currentTableData = [];
+  let originalTableData = [];
   let currentTableName = '';
 
   // Load available tables
@@ -74,9 +102,24 @@ export async function renderTableExport() {
       
       if (res.ok) {
         currentTableData = data.rows || [];
+        originalTableData = JSON.parse(JSON.stringify(currentTableData)); // Deep copy for reset
         currentTableName = tableName;
         exportTableBtn.style.display = 'inline-block';
         dropTableBtn.style.display = 'inline-block';
+        sortingControls.style.display = 'block';
+        
+        // Populate sort column dropdown
+        if (currentTableData.length > 0) {
+          const columns = Object.keys(currentTableData[0]).filter(k => !k.startsWith('_') && k !== 'created_at');
+          sortColumn.innerHTML = '<option value="">-- Select column --</option>';
+          columns.forEach(col => {
+            const opt = document.createElement('option');
+            opt.value = col;
+            opt.textContent = col;
+            sortColumn.appendChild(opt);
+          });
+        }
+        
         tableArea.innerHTML = buildTable(currentTableData);
         exportMsg.textContent = `✓ Loaded ${currentTableData.length} rows from "${tableName}"`;
         exportMsg.style.color = 'green';
@@ -173,6 +216,55 @@ export async function renderTableExport() {
       exportMsg.textContent = `✗ Drop failed: ${err.message}`;
       exportMsg.style.color = 'red';
     }
+  });
+
+  // Apply sorting
+  applySortBtn.addEventListener('click', () => {
+    const column = sortColumn.value;
+    const order = sortOrder.value;
+
+    if (!column) {
+      exportMsg.textContent = 'Please select a column to sort by';
+      exportMsg.style.color = 'orange';
+      return;
+    }
+
+    // Create sorted copy of data
+    const sorted = JSON.parse(JSON.stringify(currentTableData));
+    
+    sorted.sort((a, b) => {
+      let valA = String(a[column] ?? '').trim().toLowerCase();
+      let valB = String(b[column] ?? '').trim().toLowerCase();
+
+      // Try numeric comparison if both look like numbers
+      const numA = parseFloat(valA);
+      const numB = parseFloat(valB);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return order === 'asc' ? numA - numB : numB - numA;
+      }
+
+      // String comparison
+      if (order === 'asc') {
+        return valA.localeCompare(valB);
+      } else {
+        return valB.localeCompare(valA);
+      }
+    });
+
+    currentTableData = sorted;
+    tableArea.innerHTML = buildTable(currentTableData);
+    exportMsg.textContent = `✓ Sorted by "${column}" (${order === 'asc' ? 'Ascending' : 'Descending'})`;
+    exportMsg.style.color = 'green';
+  });
+
+  // Reset sorting
+  resetSortBtn.addEventListener('click', () => {
+    currentTableData = JSON.parse(JSON.stringify(originalTableData));
+    sortColumn.value = '';
+    sortOrder.value = 'asc';
+    tableArea.innerHTML = buildTable(currentTableData);
+    exportMsg.textContent = '✓ Sorting reset to original order';
+    exportMsg.style.color = 'green';
   });
 
   // Load tables on page load
