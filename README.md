@@ -1,36 +1,22 @@
-# filt — Excel import + table view + reconcile
+# filt � Excel import + table view + reconcile + database
 
-Small demo app with frontend SPA and Express backend.
+Small demo app with frontend SPA and Express backend with PostgreSQL integration.
 
-Features
-- Frontend single-page app using hash routing (`#home`, `#template`, `#import`, `#reconcile`, `#table`) so pages work on refresh.
-- Upload Excel (`.xlsx`/`.xls`) file; backend parses it to JSON and stores in memory.
-- **Reconcile tool**: Upload an old/messy product list and a clean template. Manually match each old record with a template row by searching.
-- Table view shows parsed rows.
-- Export reconciled data as Excel file.
+## Features
+- Reconcile tool: Upload old/messy data and clean template, match records by searching
+- FK column auto-fills with template PK
+- Save to PostgreSQL database or download as Excel
+- Hash-based SPA routing for all pages
 
-Quick setup (PowerShell)
+## Quick Setup
 
-```powershell
-cd c:\Users\ihsan\Documents\GitHub\filt
-npm install
-npm start
-# Open http://localhost:3000 in your browser
-```
+pm install && npm start then open http://localhost:3000
 
-API
-- `POST /api/import` — form upload (field name `file`), returns `{ ok: true, rows: N }` on success
-- `GET /api/data` — returns `{ rows: [...] }` with the parsed rows
-- `POST /api/reconcile/old` — upload old/messy data file
-- `POST /api/reconcile/template` — upload clean template file
-- `GET /api/reconcile/data` — fetch loaded old data rows
-- `GET /api/reconcile/search?q=...` — search template rows by query (case-insensitive)
-- `POST /api/reconcile/save` — save reconciliation matches, returns merged data (old + template columns with `template_` prefix)
+## Configuration
+Edit .env with your PostgreSQL credentials
 
-Notes
-- Data is kept in memory for the demo. For production, persist to a database or file.
-- Reconciliation workflow:
-  1. Upload old/messy product list
-  2. Upload clean template
-  3. For each old record, search and select the matching template row from a dropdown
-  4. Download reconciled output as Excel file (contains all old columns + matched template columns)
+## Workflow
+1. Upload old data (messy product list)
+2. Upload template (clean reference with PK)
+3. Match each record by searching template
+4. Save to database or download Excel

@@ -177,8 +177,18 @@ async function renderReconcile() {
           <p>Click the dropdown in the "Match" column to search and select a template row for each record.</p>
           <div id="tableContainer" style="overflow-x:auto"></div>
           <div class="controls">
-            <button id="saveBtn" class="btn primary">Save Reconciled Data</button>
+            <button id="downloadBtn" class="btn">Download Excel</button>
+            <button id="saveDbBtn" class="btn primary">Save to Database</button>
             <div id="saveMsg"></div>
+          </div>
+          <div style="margin-top:12px;padding:12px;background:#f0f7ff;border-radius:6px;display:none" id="dbOptions">
+            <label>Database Table:</label>
+            <select id="tableSelect" style="padding:4px;margin-right:8px">
+              <option value="">-- Select or type table name --</option>
+            </select>
+            <input type="text" id="customTableName" placeholder="Or enter custom table name" style="padding:4px;margin-right:8px"/>
+            <button id="confirmDbSaveBtn" class="btn primary">Confirm Save to DB</button>
+            <button id="cancelDbBtn" class="btn">Cancel</button>
           </div>
         </div>
       </div>
@@ -190,7 +200,13 @@ async function renderReconcile() {
   const matchingArea = document.getElementById('matchingArea');
   const oldMsg = document.getElementById('oldMsg');
   const templateMsg = document.getElementById('templateMsg');
-  const saveBtn = document.getElementById('saveBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const saveDbBtn = document.getElementById('saveDbBtn');
+  const confirmDbSaveBtn = document.getElementById('confirmDbSaveBtn');
+  const cancelDbBtn = document.getElementById('cancelDbBtn');
+  const dbOptions = document.getElementById('dbOptions');
+  const tableSelect = document.getElementById('tableSelect');
+  const customTableName = document.getElementById('customTableName');
   const saveMsg = document.getElementById('saveMsg');
   const tableContainer = document.getElementById('tableContainer');
 
@@ -350,8 +366,8 @@ async function renderReconcile() {
       });
     });
 
-    // Save handler
-    saveBtn.addEventListener('click', async () => {
+    // Download Excel handler
+    downloadBtn.addEventListener('click', async () => {
       const matches = [];
       document.querySelectorAll('.match-select').forEach(sel => {
         const oldIdx = parseInt(sel.dataset.rowIndex);
@@ -359,7 +375,7 @@ async function renderReconcile() {
         matches.push({ oldIndex: oldIdx, templateIndex: tmplIdx });
       });
 
-      saveMsg.textContent = 'Saving...';
+      saveMsg.textContent = 'Preparing...';
 
       try {
         const res = await fetch('/api/reconcile/save', {
@@ -381,6 +397,78 @@ async function renderReconcile() {
       } catch (err) {
         console.error(err);
         saveMsg.textContent = 'Save error';
+      }
+    });
+
+    // Save to Database button handler
+    saveDbBtn.addEventListener('click', async () => {
+      // Fetch available tables
+      try {
+        const res = await fetch('/api/reconcile/tables');
+        const { tables } = await res.json();
+        tableSelect.innerHTML = '<option value="">-- Select or type table name --</option>';
+        tables.forEach(tbl => {
+          const opt = document.createElement('option');
+          opt.value = tbl;
+          opt.textContent = tbl;
+          tableSelect.appendChild(opt);
+        });
+        dbOptions.style.display = 'block';
+      } catch (err) {
+        saveMsg.textContent = 'Failed to fetch tables: ' + err.message;
+      }
+    });
+
+    // Cancel DB options
+    cancelDbBtn.addEventListener('click', () => {
+      dbOptions.style.display = 'none';
+      saveMsg.textContent = '';
+    });
+
+    // Confirm save to DB
+    confirmDbSaveBtn.addEventListener('click', async () => {
+      const selectedTable = tableSelect.value || customTableName.value;
+      if (!selectedTable.trim()) {
+        saveMsg.textContent = 'Please select or enter a table name';
+        return;
+      }
+
+      const matches = [];
+      document.querySelectorAll('.match-select').forEach(sel => {
+        const oldIdx = parseInt(sel.dataset.rowIndex);
+        const tmplIdx = sel.value ? parseInt(sel.value) : null;
+        matches.push({ oldIndex: oldIdx, templateIndex: tmplIdx });
+      });
+
+      saveMsg.textContent = 'Saving to database...';
+
+      try {
+        const res = await fetch('/api/reconcile/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matches })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          // Now save to DB
+          const dbRes = await fetch('/api/reconcile/save-db', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: data.data, tableName: selectedTable.trim() })
+          });
+          const dbData = await dbRes.json();
+          if (dbRes.ok) {
+            saveMsg.textContent = `Successfully inserted ${dbData.inserted}/${dbData.total} rows into table "${selectedTable}"`;
+            dbOptions.style.display = 'none';
+          } else {
+            saveMsg.textContent = dbData.error || 'Database save failed';
+          }
+        } else {
+          saveMsg.textContent = data.error || 'Reconciliation failed';
+        }
+      } catch (err) {
+        console.error(err);
+        saveMsg.textContent = 'Error: ' + err.message;
       }
     });
   }

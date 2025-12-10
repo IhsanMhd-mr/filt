@@ -3,6 +3,7 @@ const multer = require('multer');
 const xlsx = require('xlsx');
 const path = require('path');
 const cors = require('cors');
+const db = require('./db');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -193,6 +194,63 @@ app.post('/api/reconcile/save', express.json(), (req, res) => {
   });
 
   res.json({ ok: true, data: reconciled });
+});
+
+// API: save reconciled data to PostgreSQL database
+app.post('/api/reconcile/save-db', express.json(), async (req, res) => {
+  const { data, tableName } = req.body;
+
+  if (!Array.isArray(data) || !tableName) {
+    return res.status(400).json({ error: 'Invalid data or table name' });
+  }
+
+  if (data.length === 0) {
+    return res.status(400).json({ error: 'No data to insert' });
+  }
+
+  try {
+    // Get column names from first row
+    const columns = Object.keys(data[0]);
+    const columnsStr = columns.join(', ');
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+
+    // Insert all rows
+    let insertedCount = 0;
+    for (const row of data) {
+      const values = columns.map(col => row[col] ?? null);
+      const query = `INSERT INTO ${tableName} (${columnsStr}) VALUES (${placeholders})`;
+      
+      try {
+        await db.query(query, values);
+        insertedCount++;
+      } catch (err) {
+        console.error(`Error inserting row:`, err.message);
+        // Continue with next row
+      }
+    }
+
+    res.json({ ok: true, inserted: insertedCount, total: data.length });
+  } catch (err) {
+    console.error('Database save error:', err);
+    res.status(500).json({ error: 'Failed to save to database: ' + err.message });
+  }
+});
+
+// API: get list of tables in database
+app.get('/api/reconcile/tables', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `);
+    const tables = result.rows.map(r => r.table_name);
+    res.json({ tables });
+  } catch (err) {
+    console.error('Error fetching tables:', err);
+    res.status(500).json({ error: 'Failed to fetch tables' });
+  }
 });
 
 // All other routes serve index.html so SPA routes work on refresh
