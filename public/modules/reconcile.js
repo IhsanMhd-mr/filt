@@ -45,6 +45,28 @@ export async function renderReconcile() {
         <div id="templateMsg"></div>
         <button id="downloadTemplateJsonBtn" class="btn" style="display:none;margin-top:8px">Download Template (JSON)</button>
 
+        <h3>Step 2b: Add Records Row by Row (Optional)</h3>
+        <div style="padding:12px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-bottom:16px">
+          <p style="margin-top:0;color:#856404">Manually add records one at a time to the current table</p>
+          <div id="rowByRowForm" style="display:none">
+            <div id="rowInputFields" style="margin-bottom:12px"></div>
+            <button type="button" id="addRowBtn" class="btn primary">Add Row</button>
+            <div id="rowMsg" style="margin-top:8px"></div>
+          </div>
+          <div id="noTableMsg" style="color:#856404">Select or create a table first in Step 1 or 3</div>
+        </div>
+
+        <h3>Step 2c: Quick Excel Upload (No Reconciliation)</h3>
+        <div style="padding:12px;background:#e8f5e9;border:1px solid #4caf50;border-radius:6px;margin-bottom:16px">
+          <p style="margin-top:0;color:#2e7d32">Upload Excel sheets directly to database as-is</p>
+          <form id="quickUploadForm" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+            <input type="file" id="quickExcelFile" accept=".xlsx,.xls" required style="flex:1;min-width:250px"/>
+            <input type="text" id="quickTableName" placeholder="Table name (auto from sheet)" style="padding:8px;border:1px solid #ddd;border-radius:4px;width:200px"/>
+            <button type="submit" class="btn" style="background:#4caf50;color:#fff">📤 Upload as Table</button>
+          </form>
+          <div id="quickUploadMsg"></div>
+        </div>
+
         <div id="matchingArea" style="display:none">
           <h3>Step 3: Match Records</h3>
           <p>For each record, search and select a matching template row. FK updates live in the database.</p>
@@ -115,6 +137,15 @@ export async function renderReconcile() {
   const reconcileTemplateForm = document.getElementById('reconcileTemplateForm');
   const templateMsg = document.getElementById('templateMsg');
   const downloadTemplateJsonBtn = document.getElementById('downloadTemplateJsonBtn');
+  const quickUploadForm = document.getElementById('quickUploadForm');
+  const quickExcelFile = document.getElementById('quickExcelFile');
+  const quickTableName = document.getElementById('quickTableName');
+  const quickUploadMsg = document.getElementById('quickUploadMsg');
+  const rowByRowForm = document.getElementById('rowByRowForm');
+  const rowInputFields = document.getElementById('rowInputFields');
+  const addRowBtn = document.getElementById('addRowBtn');
+  const rowMsg = document.getElementById('rowMsg');
+  const noTableMsg = document.getElementById('noTableMsg');
   const matchingArea = document.getElementById('matchingArea');
   const reconcileTableArea = document.getElementById('reconcileTableArea');
   const tableContainer = document.getElementById('tableContainer');
@@ -170,6 +201,10 @@ export async function renderReconcile() {
         loadTableMsg.textContent = `Loaded ${oldRows.length} records from table "${tableName}"`;
         loadTableMsg.style.color = 'green';
         oldDataLoaded = true;
+        
+        // Show row-by-row form for loaded table
+        showRowByRowForm(tableName);
+        
         if (templateRows.length > 0) {
           matchingArea.style.display = 'block';
           reconcileTableArea.style.display = 'none';
@@ -183,6 +218,96 @@ export async function renderReconcile() {
       console.error(err);
       loadTableMsg.textContent = 'Error loading table';
       loadTableMsg.style.color = 'red';
+    }
+  });
+
+  // Show row-by-row form when table is loaded
+  function showRowByRowForm(tableName) {
+    if (!oldRows.length) {
+      noTableMsg.textContent = 'No table data available';
+      rowByRowForm.style.display = 'none';
+      return;
+    }
+    
+    // Get column names from the first row
+    const columns = Object.keys(oldRows[0]).filter(k => !k.startsWith('_') && k !== 'id' && k !== 'created_at');
+    
+    // Generate input fields
+    let fieldsHtml = '';
+    columns.forEach(col => {
+      fieldsHtml += `
+        <div style="margin-bottom:8px">
+          <label><strong>${escapeHtml(col)}:</strong></label>
+          <input type="text" class="row-input" data-column="${col}" placeholder="Enter ${col}" style="padding:6px;border:1px solid #ddd;border-radius:4px;width:100%;box-sizing:border-box;margin-top:4px"/>
+        </div>
+      `;
+    });
+    
+    rowInputFields.innerHTML = fieldsHtml;
+    noTableMsg.style.display = 'none';
+    rowByRowForm.style.display = 'block';
+  }
+
+  // Add row event listener
+  addRowBtn.addEventListener('click', async () => {
+    if (!selectedTableName && !loadedTable) {
+      rowMsg.textContent = 'No table selected';
+      rowMsg.style.color = 'red';
+      return;
+    }
+
+    const tableName = loadedTable || selectedTableName;
+    const inputs = document.querySelectorAll('.row-input');
+    const rowData = {};
+    let hasValue = false;
+
+    // Collect input values
+    inputs.forEach(input => {
+      const col = input.dataset.column;
+      const val = input.value.trim();
+      rowData[col] = val;
+      if (val) hasValue = true;
+    });
+
+    if (!hasValue) {
+      rowMsg.textContent = 'Please fill in at least one field';
+      rowMsg.style.color = 'orange';
+      return;
+    }
+
+    rowMsg.textContent = 'Adding row...';
+    rowMsg.style.color = '#666';
+
+    try {
+      const res = await fetch('/api/reconcile/add-row', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableName, rowData })
+      });
+      const result = await res.json();
+
+      if (res.ok) {
+        rowMsg.textContent = `✓ Row added successfully (ID: ${result.id})`;
+        rowMsg.style.color = 'green';
+        
+        // Clear inputs
+        inputs.forEach(input => input.value = '');
+        
+        // Add to oldRows
+        oldRows.push(rowData);
+        
+        // Refresh table if displayed
+        if (loadedTable === tableName) {
+          showReconcileTable(tableName);
+        }
+      } else {
+        rowMsg.textContent = `✗ Error: ${result.error}`;
+        rowMsg.style.color = 'red';
+      }
+    } catch (err) {
+      console.error('Add row error:', err);
+      rowMsg.textContent = `✗ Error: ${err.message}`;
+      rowMsg.style.color = 'red';
     }
   });
 
@@ -272,19 +397,92 @@ export async function renderReconcile() {
     }
   });
 
+  // Quick Excel upload - upload as-is without reconciliation
+  quickUploadForm.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const file = quickExcelFile.files[0];
+    if (!file) return;
+
+    quickUploadMsg.textContent = 'Processing Excel file...';
+    quickUploadMsg.style.color = '#666';
+
+    try {
+      // Parse Excel file using XLSX
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = window.XLSX.read(arrayBuffer, { type: 'array' });
+      
+      // Get sheet names
+      const sheetNames = workbook.SheetNames;
+      let tableName = quickTableName.value.trim();
+      
+      if (!tableName) {
+        // Use first sheet name if no table name provided
+        tableName = sheetNames[0];
+      }
+
+      if (!tableName) {
+        quickUploadMsg.textContent = 'Please provide a table name';
+        quickUploadMsg.style.color = 'red';
+        return;
+      }
+
+      // Process first sheet
+      const worksheet = workbook.Sheets[sheetNames[0]];
+      const data = window.XLSX.utils.sheet_to_json(worksheet);
+
+      if (data.length === 0) {
+        quickUploadMsg.textContent = 'No data found in Excel file';
+        quickUploadMsg.style.color = 'orange';
+        return;
+      }
+
+      // Send to server
+      const res = await fetch('/api/quick-upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          tableName, 
+          data,
+          sheetName: sheetNames[0]
+        })
+      });
+
+      const result = await res.json();
+
+      if (res.ok) {
+        quickUploadMsg.textContent = `✓ Created table "${tableName}" with ${result.inserted} records from "${sheetNames[0]}"`;
+        quickUploadMsg.style.color = 'green';
+        
+        // Reset form
+        quickExcelFile.value = '';
+        quickTableName.value = '';
+        
+        // Reload table list
+        loadAvailableTables();
+      } else {
+        quickUploadMsg.textContent = `✗ Error: ${result.error}`;
+        quickUploadMsg.style.color = 'red';
+      }
+    } catch (err) {
+      console.error('Quick upload error:', err);
+      quickUploadMsg.textContent = `✗ Error: ${err.message}`;
+      quickUploadMsg.style.color = 'red';
+    }
+  });
+
   // Display reconcile table from uploaded data
   function showReconcileTableUpload() {
     matchingArea.style.display = 'block';
     reconcileTableArea.style.display = 'block';
     
     const oldColumns = oldRows.length > 0 ? Object.keys(oldRows[0]).filter(k => !k.startsWith('_')) : [];
-    const filteredColumns = oldColumns.filter(k => k !== 'FK' && k !== 'id' && k !== 'created_at');
+    // Filter out only system columns, keep FK as a regular data column
+    const filteredColumns = oldColumns.filter(k => k !== 'id' && k !== 'created_at');
     
     let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
       tableHtml += `<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left">${escapeHtml(col)}</th>`;
     });
-    tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;width:80px">FK</th>';
     tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;min-width:250px">Match</th>';
     tableHtml += '</tr></thead><tbody>';
 
@@ -294,13 +492,15 @@ export async function renderReconcile() {
         const val = String(row[col] ?? '');
         tableHtml += `<td style="padding:8px;border:1px solid #ddd">${escapeHtml(val)}</td>`;
       });
-      tableHtml += `<td style="padding:8px;border:1px solid #ddd"><strong class="fk-value" data-row-index="${idx}" data-table="">-</strong></td>`;
       tableHtml += `<td style="padding:8px;border:1px solid #ddd">
         <div class="match-cell" data-row-index="${idx}">
           <input type="text" class="match-search" placeholder="Search..." data-row-index="${idx}" style="width:100%;padding:4px;margin-bottom:4px"/>
-          <select class="match-select" data-row-index="${idx}" style="width:100%;padding:4px">
-            <option value="">-- No match --</option>
-          </select>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="match-select" data-row-index="${idx}" style="flex:1;padding:4px">
+              <option value="">-- No match --</option>
+            </select>
+            <span class="selected-pk" data-row-index="${idx}" style="min-width:60px;padding:4px;background:#f0f0f0;border-radius:3px;font-size:12px;white-space:nowrap;color:#666"></span>
+          </div>
           <div class="match-results" data-row-index="${idx}" style="max-height:150px;overflow-y:auto;border:1px solid #ccc;background:#fff;margin-top:4px;display:none"></div>
         </div>
       </td>`;
@@ -323,13 +523,13 @@ export async function renderReconcile() {
     reconcileTableArea.style.display = 'block';
     
     const oldColumns = oldRows.length > 0 ? Object.keys(oldRows[0]).filter(k => !k.startsWith('_')) : [];
-    const filteredColumns = oldColumns.filter(k => k !== 'FK' && k !== 'id' && k !== 'created_at');
+    // Filter out only system columns, keep FK as a regular data column
+    const filteredColumns = oldColumns.filter(k => k !== 'id' && k !== 'created_at');
     
     let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
       tableHtml += `<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left">${escapeHtml(col)}</th>`;
     });
-    tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;width:80px">FK</th>';
     tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;min-width:250px">Match</th>';
     tableHtml += '</tr></thead><tbody>';
 
@@ -342,13 +542,15 @@ export async function renderReconcile() {
           <button class="edit-btn" style="display:none;position:absolute;right:4px;top:4px;padding:2px 6px;font-size:12px;background:#007bff;color:#fff;border:none;border-radius:3px;cursor:pointer">✎</button>
         </td>`;
       });
-      tableHtml += `<td style="padding:8px;border:1px solid #ddd"><strong class="fk-value" data-row-index="${idx}" data-table="${tableName}">${row.FK || '-'}</strong></td>`;
       tableHtml += `<td style="padding:8px;border:1px solid #ddd">
         <div class="match-cell" data-row-index="${idx}">
           <input type="text" class="match-search" placeholder="Search..." data-row-index="${idx}" style="width:100%;padding:4px;margin-bottom:4px"/>
-          <select class="match-select" data-row-index="${idx}" style="width:100%;padding:4px">
-            <option value="">-- No match --</option>
-          </select>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="match-select" data-row-index="${idx}" style="flex:1;padding:4px">
+              <option value="">-- No match --</option>
+            </select>
+            <span class="selected-pk" data-row-index="${idx}" style="min-width:60px;padding:4px;background:#f0f0f0;border-radius:3px;font-size:12px;white-space:nowrap;color:#666"></span>
+          </div>
           <div class="match-results" data-row-index="${idx}" style="max-height:150px;overflow-y:auto;border:1px solid #ccc;background:#fff;margin-top:4px;display:none"></div>
         </div>
       </td>`;
@@ -398,39 +600,52 @@ export async function renderReconcile() {
             item.addEventListener('click', async () => {
               const tmplIdx = item.dataset.templateIndex;
               const pk = item.dataset.pk;
-              select.value = tmplIdx;
-              const fkCell = document.querySelector(`.fk-value[data-row-index="${rowIdx}"]`);
               
-              if (fkCell) {
-                const tbl = fkCell.dataset.table;
-                const oldRowData = oldRows[rowIdx];
-                
-                if (tbl) {
-                  try {
-                    const updateRes = await fetch('/api/reconcile/update-fk', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        rowIndex: rowIdx,
-                        tableName: tbl,
-                        pkValue: pk,
-                        oldData: oldRowData
-                      })
-                    });
-                    if (updateRes.ok) {
-                      fkCell.textContent = pk;
-                      fkCell.style.color = 'green';
-                    }
-                  } catch (err) {
-                    console.error('Update FK error:', err);
-                  }
-                } else {
-                  fkCell.textContent = pk;
-                  fkCell.style.color = 'green';
-                  oldRows[rowIdx].FK = pk;
-                }
+              // Update the select dropdown to show the selected template index
+              select.value = tmplIdx;
+              
+              // Update the selected PK display
+              const selectedPkSpan = document.querySelector(`.selected-pk[data-row-index="${rowIdx}"]`);
+              if (selectedPkSpan) {
+                selectedPkSpan.textContent = `FK: ${escapeHtml(String(pk))}`;
+                selectedPkSpan.style.backgroundColor = '#d4edda';
+                selectedPkSpan.style.color = '#155724';
               }
               
+              // Update FK in oldRows if we're in loaded table mode
+              if (loadedTable) {
+                const tbl = loadedTable;
+                const oldRowData = oldRows[rowIdx];
+                
+                try {
+                  const updateRes = await fetch('/api/reconcile/update-fk', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      rowIndex: rowIdx,
+                      tableName: tbl,
+                      pkValue: pk,
+                      oldData: oldRowData
+                    })
+                  });
+                  if (updateRes.ok) {
+                    // Update FK value in the table if FK column exists
+                    const fkCell = document.querySelector(`.editable-cell[data-row-index="${rowIdx}"][data-column="FK"]`);
+                    if (fkCell) {
+                      const cellValue = fkCell.querySelector('.cell-value');
+                      if (cellValue) cellValue.textContent = pk;
+                    }
+                    oldRows[rowIdx].FK = pk;
+                  }
+                } catch (err) {
+                  console.error('Update FK error:', err);
+                }
+              } else {
+                // In upload mode, just update oldRows
+                oldRows[rowIdx].FK = pk;
+              }
+              
+              // Clear search
               e.target.value = '';
               resultsDiv.style.display = 'none';
             });
@@ -549,10 +764,11 @@ export async function renderReconcile() {
     uploadMsg.style.color = '#666';
 
     try {
+      // Send the actual oldRows data with all columns including FK
       const res = await fetch('/api/reconcile/init-db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tableName })
+        body: JSON.stringify({ tableName, data: oldRows })
       });
       const data = await res.json();
 

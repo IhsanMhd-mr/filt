@@ -281,35 +281,40 @@ app.get('/api/reconcile/table/:tableName', async (req, res) => {
 
 // API: upload old data to database (initial insert)
 app.post('/api/reconcile/init-db', express.json(), async (req, res) => {
-  const { tableName } = req.body;
+  const { tableName, data } = req.body;
 
-  if (!tableName || !oldDataStore.length) {
+  // Use provided data or fall back to oldDataStore
+  const dataToInsert = data && data.length > 0 ? data : oldDataStore;
+
+  if (!tableName || !dataToInsert.length) {
     return res.status(400).json({ error: 'Invalid table name or no data' });
   }
 
   try {
-    // Get column names from first row
-    const columns = Object.keys(oldDataStore[0]).filter(k => !k.startsWith('_'));
+    // Get column names from first row, exclude system columns
+    const columns = Object.keys(dataToInsert[0]).filter(k => 
+      !k.startsWith('_') && k !== 'created_at' && k !== 'id'
+    );
     
-    // Create table if it doesn't exist with TEXT columns for all data + FK column for reconciliation
+    // Create table if it doesn't exist with TEXT columns for all data
+    // NOTE: FK column is treated as a regular data column if present
     const columnDefs = columns.map(col => `"${col}" TEXT`).join(', ');
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS "${tableName}" (
         id SERIAL PRIMARY KEY,
         ${columnDefs},
-        "FK" INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `;
     
     await db.query(createTableQuery);
     
-    // Insert all old data rows
+    // Insert all data rows
     const columnsStr = columns.map(c => `"${c}"`).join(', ');
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
 
     let insertedCount = 0;
-    for (const row of oldDataStore) {
+    for (const row of dataToInsert) {
       const values = columns.map(col => row[col] ?? null);
       const query = `INSERT INTO "${tableName}" (${columnsStr}) VALUES (${placeholders}) RETURNING *`;
       
@@ -321,7 +326,7 @@ app.post('/api/reconcile/init-db', express.json(), async (req, res) => {
       }
     }
 
-    res.json({ ok: true, inserted: insertedCount, total: oldDataStore.length });
+    res.json({ ok: true, inserted: insertedCount, total: dataToInsert.length });
   } catch (err) {
     console.error('Database init error:', err);
     res.status(500).json({ error: 'Failed to upload to database: ' + err.message });
@@ -505,6 +510,37 @@ app.post('/api/reconcile/update-cell', express.json(), async (req, res) => {
   }
 });
 
+// API: Add a single row to the table
+app.post('/api/reconcile/add-row', express.json(), async (req, res) => {
+  const { tableName, rowData } = req.body;
+
+  if (!tableName || !rowData) {
+    return res.status(400).json({ error: 'Missing tableName or rowData' });
+  }
+
+  try {
+    // Get column names from rowData
+    const columns = Object.keys(rowData).filter(k => k && !k.startsWith('_'));
+    
+    if (columns.length === 0) {
+      return res.status(400).json({ error: 'No data provided' });
+    }
+
+    // Build query
+    const columnsStr = columns.map(c => `"${c}"`).join(', ');
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+    const values = columns.map(col => rowData[col] ?? null);
+
+    const query = `INSERT INTO "${tableName}" (${columnsStr}) VALUES (${placeholders}) RETURNING id`;
+    const result = await db.query(query, values);
+    
+    res.json({ ok: true, id: result.rows[0].id, message: 'Row added successfully' });
+  } catch (err) {
+    console.error('Error adding row:', err);
+    res.status(500).json({ error: 'Failed to add row: ' + err.message });
+  }
+});
+
 // API: remove a column from the table
 app.post('/api/reconcile/remove-column', express.json(), async (req, res) => {
   const { tableName, columnName } = req.body;
@@ -597,6 +633,65 @@ app.post('/api/reset-db', express.json(), async (req, res) => {
   } catch (err) {
     console.error('Error resetting database:', err);
     res.status(500).json({ error: 'Failed to reset database: ' + err.message });
+  }
+});
+
+// API: Quick upload - upload Excel sheet directly to database without reconciliation
+app.post('/api/quick-upload', express.json(), async (req, res) => {
+  const { tableName, data, sheetName } = req.body;
+
+  if (!tableName || !data || !Array.isArray(data) || data.length === 0) {
+    return res.status(400).json({ error: 'Invalid table name or data' });
+  }
+
+  try {
+    // Get column names from first row
+    const columns = Object.keys(data[0]).filter(k => k && !k.startsWith('_'));
+    
+    if (columns.length === 0) {
+      return res.status(400).json({ error: 'No columns found in data' });
+    }
+
+    // Create table if it doesn't exist with TEXT columns
+    const columnDefs = columns.map(col => `"${col}" TEXT`).join(', ');
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS "${tableName}" (
+        id SERIAL PRIMARY KEY,
+        ${columnDefs},
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    
+    await db.query(createTableQuery);
+    
+    // Insert all rows
+    const columnsStr = columns.map(c => `"${c}"`).join(', ');
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+
+    let insertedCount = 0;
+    for (const row of data) {
+      const values = columns.map(col => String(row[col] ?? '').trim() || null);
+      const query = `INSERT INTO "${tableName}" (${columnsStr}) VALUES (${placeholders})`;
+      
+      try {
+        await db.query(query, values);
+        insertedCount++;
+      } catch (err) {
+        console.error(`Error inserting row:`, err.message);
+      }
+    }
+
+    res.json({ 
+      ok: true, 
+      inserted: insertedCount, 
+      total: data.length,
+      tableName,
+      sheetName,
+      message: `Successfully created table "${tableName}" with ${insertedCount} records`
+    });
+  } catch (err) {
+    console.error('Quick upload error:', err);
+    res.status(500).json({ error: 'Failed to upload data: ' + err.message });
   }
 });
 
