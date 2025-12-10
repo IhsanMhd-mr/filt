@@ -507,35 +507,35 @@ export async function renderReconcile() {
     // Filter out only system columns (created_at), show id and other data columns
     const filteredColumns = oldColumns.filter(k => k !== 'created_at');
     
-    let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
+    let tableHtml = '<div style="margin:80px 0;width:1400px"><table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
-      tableHtml += `<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left">${escapeHtml(col)}</th>`;
+      tableHtml += `<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;">${escapeHtml(col)}</th>`;
     });
-    tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;min-width:250px">Match</th>';
+    tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;min-width:35%">Match</th>';
     tableHtml += '</tr></thead><tbody>';
-
+    
     oldRows.forEach((row, idx) => {
       tableHtml += '<tr>';
       filteredColumns.forEach(col => {
         const val = String(row[col] ?? '');
-        tableHtml += `<td style="padding:8px;border:1px solid #ddd">${escapeHtml(val)}</td>`;
+        tableHtml += `<td style="padding:8px;border:1px solid #ddd;font-size:12px">${escapeHtml(val)}</td>`;
       });
-      tableHtml += `<td style="padding:8px;border:1px solid #ddd">
-        <div class="match-cell" data-row-index="${idx}">
-          <input type="text" class="match-search" placeholder="Search..." data-row-index="${idx}" style="width:100%;padding:4px;margin-bottom:4px"/>
-          <div style="display:flex;gap:8px;align-items:center">
-            <select class="match-select" data-row-index="${idx}" style="flex:1;padding:4px">
+      tableHtml += `<td style="padding:8px;border:1px solid #ddd;min-height:150px;vertical-align:top;min-width:35%">
+        <div class="match-cell" data-row-index="${idx}" style="width:100%;height:100%">
+          <input type="text" class="match-search" placeholder="Search..." data-row-index="${idx}" style="width:100%;padding:4px;margin-bottom:4px;box-sizing:border-box"/>
+          <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+            <select class="match-select" data-row-index="${idx}" style="width:100%;padding:4px;box-sizing:border-box">
               <option value="">-- No match --</option>
             </select>
-            <span class="selected-pk" data-row-index="${idx}" style="min-width:60px;padding:4px;background:#f0f0f0;border-radius:3px;font-size:12px;white-space:nowrap;color:#666"></span>
+            <span class="selected-pk" data-row-index="${idx}" style="padding:4px;background:#d4edda;border-radius:3px;font-size:12px;color:#155724;display:none;width:100%;text-align:center">Selected</span>
           </div>
-          <div class="match-results" data-row-index="${idx}" style="max-height:150px;overflow-y:auto;border:1px solid #ccc;background:#fff;margin-top:4px;display:none"></div>
+          <div class="match-results" data-row-index="${idx}" style="max-height:120px;overflow-y:auto;border:1px solid #ccc;background:#fff;margin-top:4px;display:none;width:100%;font-size:12px"></div>
         </div>
       </td>`;
       tableHtml += '</tr>';
     });
-
-    tableHtml += '</tbody></table>';
+    
+    tableHtml += '</tbody></table></div>';
     tableContainer.innerHTML = tableHtml;
 
     // Setup search handlers
@@ -567,38 +567,38 @@ export async function renderReconcile() {
     });
     reconcileSortControls.style.display = 'block';
     
-    let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
+    let tableHtml = '<div style="margin:80px auto;width:1400px"><table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
-      tableHtml += `<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left">${escapeHtml(col)}</th>`;
+      tableHtml += `<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;font-size:12px">${escapeHtml(col)}</th>`;
     });
-    tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;min-width:250px">Match</th>';
+    tableHtml += '<th style="padding:8px;border:1px solid #ddd;background:#f5f5f5;text-align:left;min-width:35%">Match</th>';
     tableHtml += '</tr></thead><tbody>';
-
+    
     oldRows.forEach((row, idx) => {
       tableHtml += '<tr>';
       filteredColumns.forEach(col => {
         const val = String(row[col] ?? '');
-        tableHtml += `<td style="padding:8px;border:1px solid #ddd;cursor:pointer;position:relative" class="editable-cell" data-row-index="${idx}" data-column="${col}" title="Click to edit">
+        tableHtml += `<td style="padding:8px;border:1px solid #ddd;font-size:12px;cursor:pointer;position:relative" class="editable-cell" data-row-index="${idx}" data-column="${col}" title="Click to edit">
           <span class="cell-value">${escapeHtml(val)}</span>
-          <button class="edit-btn" style="display:none;position:absolute;right:4px;top:4px;padding:2px 6px;font-size:12px;background:#007bff;color:#fff;border:none;border-radius:3px;cursor:pointer">✎</button>
+          <button class="edit-btn" style="display:none;position:absolute;right:2px;top:2px;padding:2px 4px;font-size:10px;background:#007bff;color:#fff;border:none;border-radius:2px;cursor:pointer">✎</button>
         </td>`;
       });
-      tableHtml += `<td style="padding:8px;border:1px solid #ddd">
-        <div class="match-cell" data-row-index="${idx}">
-          <input type="text" class="match-search" placeholder="Search..." data-row-index="${idx}" style="width:100%;padding:4px;margin-bottom:4px"/>
-          <div style="display:flex;gap:8px;align-items:center">
-            <select class="match-select" data-row-index="${idx}" style="flex:1;padding:4px">
+      tableHtml += `<td style="padding:8px;border:1px solid #ddd;min-height:150px;vertical-align:top;min-width:35%">
+        <div class="match-cell" data-row-index="${idx}" style="width:100%;height:100%">
+          <input type="text" class="match-search" placeholder="Search..." data-row-index="${idx}" style="width:100%;padding:4px;margin-bottom:4px;box-sizing:border-box"/>
+          <div style="display:flex;flex-direction:column;gap:4px;width:100%">
+            <select class="match-select" data-row-index="${idx}" style="width:100%;padding:4px;box-sizing:border-box">
               <option value="">-- No match --</option>
             </select>
-            <span class="selected-pk" data-row-index="${idx}" style="min-width:60px;padding:4px;background:#f0f0f0;border-radius:3px;font-size:12px;white-space:nowrap;color:#666"></span>
+            <span class="selected-pk" data-row-index="${idx}" style="padding:4px;background:#d4edda;border-radius:3px;font-size:12px;color:#155724;display:none;width:100%;text-align:center">Selected</span>
           </div>
-          <div class="match-results" data-row-index="${idx}" style="max-height:150px;overflow-y:auto;border:1px solid #ccc;background:#fff;margin-top:4px;display:none"></div>
+          <div class="match-results" data-row-index="${idx}" style="max-height:120px;overflow-y:auto;border:1px solid #ccc;background:#fff;margin-top:4px;display:none;width:100%;font-size:12px"></div>
         </div>
       </td>`;
       tableHtml += '</tr>';
     });
-
-    tableHtml += '</tbody></table>';
+    
+    tableHtml += '</tbody></table></div>';
     tableContainer.innerHTML = tableHtml;
 
     // Setup handlers
@@ -651,6 +651,7 @@ export async function renderReconcile() {
                 selectedPkSpan.textContent = `FK: ${escapeHtml(String(pk))}`;
                 selectedPkSpan.style.backgroundColor = '#d4edda';
                 selectedPkSpan.style.color = '#155724';
+                selectedPkSpan.style.display = 'block';
               }
               
               // Update FK in oldRows if we're in loaded table mode

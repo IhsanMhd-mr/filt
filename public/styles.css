@@ -5,7 +5,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 header h1{margin:0;font-size:1.1rem}
 nav button{margin-left:8px;padding:8px 12px;border-radius:6px;border:1px solid #ddd;background:#fff;cursor:pointer}
 nav button:hover{background:#f0f6ff}
-main{max-width:1100px;margin:18px auto;padding:16px}
+main{max-width:1400px;margin:18px auto;padding:16px}
 section{background:var(--card);padding:18px;border-radius:8px;box-shadow:0 6px 18px rgba(12,24,48,.04)}
 .controls{margin-top:12px}
 .btn{display:inline-block;padding:8px 12px;border-radius:6px;border:1px solid #bbb;text-decoration:none;color:#111;margin-right:8px}
