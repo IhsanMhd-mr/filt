@@ -9,7 +9,9 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
-app.use(express.json());
+// Increase JSON payload limit to handle large datasets
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // In-memory store for parsed data (simple for demo)
 let dataStore = [];
@@ -164,6 +166,10 @@ app.post('/api/reconcile/save', express.json(), (req, res) => {
     return res.status(400).json({ error: 'Invalid matches format' });
   }
 
+  if (oldDataStore.length === 0) {
+    return res.status(400).json({ error: 'No old data available' });
+  }
+
   // Build reconciled output: old row + FK (template PK) + matched template row side-by-side
   const reconciled = oldDataStore.map((oldRow, idx) => {
     const match = matches.find(m => m.oldIndex === idx);
@@ -179,7 +185,7 @@ app.post('/api/reconcile/save', express.json(), (req, res) => {
       merged.FK = null;
     }
 
-    // Add template columns with prefix
+    // Add template columns with prefix to avoid conflicts
     if (templateRow) {
       Object.entries(templateRow).forEach(([k, v]) => {
         if (k !== 'PK') { // Don't duplicate PK, it's in FK
@@ -188,6 +194,7 @@ app.post('/api/reconcile/save', express.json(), (req, res) => {
       });
     }
     
+    // Clean up internal fields
     delete merged._rowIndex;
     delete merged._matched;
     return merged;
@@ -385,6 +392,42 @@ app.post('/api/reconcile/update-fk', express.json(), async (req, res) => {
   }
 });
 
+// API: add new column to table
+app.post('/api/reconcile/add-column', express.json(), async (req, res) => {
+  const { tableName, columnName, columnType } = req.body;
+
+  if (!tableName || !columnName || !columnType) {
+    return res.status(400).json({ error: 'Missing table name, column name, or type' });
+  }
+
+  // Validate column name and type
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(columnName)) {
+    return res.status(400).json({ error: 'Invalid column name' });
+  }
+
+  if (!/^[A-Z]+$/.test(tableName)) {
+    if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
+      return res.status(400).json({ error: 'Invalid table name' });
+    }
+  }
+
+  try {
+    const validTypes = ['TEXT', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'DATE', 'TIMESTAMP'];
+    if (!validTypes.includes(columnType)) {
+      return res.status(400).json({ error: 'Invalid column type' });
+    }
+
+    const alterQuery = `ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${columnType}`;
+    console.log('Adding column:', { tableName, columnName, columnType, query: alterQuery });
+    
+    await db.query(alterQuery);
+    res.json({ ok: true, message: `Column "${columnName}" added successfully` });
+  } catch (err) {
+    console.error('Error adding column:', err);
+    res.status(500).json({ error: 'Failed to add column: ' + err.message });
+  }
+});
+
 // API: download old/messy data as JSON
 app.get('/api/reconcile/download-old-json', (req, res) => {
   if (!oldDataStore.length) {
@@ -412,6 +455,83 @@ app.get('/api/reconcile/download-template-json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', 'attachment; filename=template_data.json');
   res.json(templateRows);
+});
+
+// API: update a cell value in the table
+app.post('/api/reconcile/update-cell', express.json(), async (req, res) => {
+  const { tableName, rowIndex, column, newValue, oldData } = req.body;
+
+  if (!tableName || typeof rowIndex !== 'number' || !column || newValue === undefined) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  if (!/^[a-zA-Z0-9_]+$/.test(tableName) || !/^[a-zA-Z0-9_]+$/.test(column)) {
+    return res.status(400).json({ error: 'Invalid table or column name' });
+  }
+
+  try {
+    // Build WHERE clause to find the row
+    let whereClause = '';
+    let queryParams = [newValue];
+    let paramCount = 2;
+
+    if (oldData && typeof oldData === 'object') {
+      const conditions = [];
+      Object.entries(oldData).forEach(([key, val]) => {
+        if (key !== 'id' && key !== 'created_at' && key !== 'FK') {
+          conditions.push(`"${key}" = $${paramCount}`);
+          queryParams.push(val);
+          paramCount++;
+        }
+      });
+      if (conditions.length > 0) {
+        whereClause = 'WHERE ' + conditions.join(' AND ');
+      }
+    }
+
+    let updateQuery = `UPDATE "${tableName}" SET "${column}" = $1 ${whereClause}`;
+    console.log('Update cell query:', updateQuery, 'params:', queryParams);
+
+    const result = await db.query(updateQuery, queryParams);
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Row not found' });
+    }
+
+    res.json({ ok: true, message: 'Cell updated successfully', rowsAffected: result.rowCount });
+  } catch (err) {
+    console.error('Error updating cell:', err);
+    res.status(500).json({ error: 'Failed to update cell: ' + err.message });
+  }
+});
+
+// API: remove a column from the table
+app.post('/api/reconcile/remove-column', express.json(), async (req, res) => {
+  const { tableName, columnName } = req.body;
+
+  if (!tableName || !columnName) {
+    return res.status(400).json({ error: 'Missing tableName or columnName' });
+  }
+
+  if (!/^[a-zA-Z0-9_]+$/.test(tableName) || !/^[a-zA-Z0-9_]+$/.test(columnName)) {
+    return res.status(400).json({ error: 'Invalid table or column name' });
+  }
+
+  // Prevent removing system columns
+  if (['id', 'created_at', 'FK'].includes(columnName)) {
+    return res.status(400).json({ error: 'Cannot remove system columns' });
+  }
+
+  try {
+    const dropQuery = `ALTER TABLE "${tableName}" DROP COLUMN "${columnName}"`;
+    console.log('Dropping column:', { tableName, columnName, query: dropQuery });
+    
+    await db.query(dropQuery);
+    res.json({ ok: true, message: `Column "${columnName}" removed successfully` });
+  } catch (err) {
+    console.error('Error removing column:', err);
+    res.status(500).json({ error: 'Failed to remove column: ' + err.message });
+  }
 });
 
 // All other routes serve index.html so SPA routes work on refresh
