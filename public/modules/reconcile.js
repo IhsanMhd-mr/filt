@@ -504,8 +504,8 @@ export async function renderReconcile() {
     reconcileTableArea.style.display = 'block';
     
     const oldColumns = oldRows.length > 0 ? Object.keys(oldRows[0]).filter(k => !k.startsWith('_')) : [];
-    // Filter out only system columns, keep FK as a regular data column
-    const filteredColumns = oldColumns.filter(k => k !== 'id' && k !== 'created_at');
+    // Filter out only system columns (created_at), show id and other data columns
+    const filteredColumns = oldColumns.filter(k => k !== 'created_at');
     
     let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
@@ -554,8 +554,8 @@ export async function renderReconcile() {
     originalOldRows = JSON.parse(JSON.stringify(oldRows));
     
     const oldColumns = oldRows.length > 0 ? Object.keys(oldRows[0]).filter(k => !k.startsWith('_')) : [];
-    // Filter out only system columns, keep FK as a regular data column
-    const filteredColumns = oldColumns.filter(k => k !== 'id' && k !== 'created_at');
+    // Filter out only system columns (created_at), show id and other data columns
+    const filteredColumns = oldColumns.filter(k => k !== 'created_at');
     
     // Populate sort column dropdown
     reconcileSortColumn.innerHTML = '<option value="">-- Select column --</option>';
