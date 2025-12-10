@@ -158,13 +158,27 @@ async function renderReconcile() {
     <section>
       <h2>Reconcile Data</h2>
       <div id="reconcileArea">
-        <h3>Step 1: Upload Old Data</h3>
-        <form id="oldDataForm">
-          <input type="file" id="oldDataFile" accept=".xlsx,.xls" required />
-          <button type="submit" class="btn primary">Upload Old Data</button>
-        </form>
-        <div id="oldMsg"></div>
-        <button id="downloadOldJsonBtn" class="btn" style="display:none;margin-top:8px">Download Old Data (JSON)</button>
+        <h3>Step 1: Select Data Source</h3>
+        <div style="margin-bottom:16px;padding:12px;background:#f0f7ff;border-radius:6px">
+          <div style="margin-bottom:12px">
+            <label><strong>Option A: Select Existing Table</strong></label>
+            <select id="dataTableSelect" style="padding:8px;margin-right:8px;font-size:14px;display:block;margin-bottom:8px;width:300px">
+              <option value="">-- Select table --</option>
+            </select>
+            <button id="loadTableBtn" class="btn primary">Load Table Data</button>
+            <div id="loadTableMsg" style="margin-top:8px"></div>
+          </div>
+          <hr style="margin:12px 0;border:none;border-top:1px solid #ccc"/>
+          <div>
+            <label><strong>Option B: Upload New Old Data</strong></label>
+            <form id="oldDataForm" style="display:flex;gap:8px;margin-top:8px">
+              <input type="file" id="oldDataFile" accept=".xlsx,.xls" required />
+              <button type="submit" class="btn primary">Upload Old Data</button>
+            </form>
+            <div id="oldMsg"></div>
+            <button id="downloadOldJsonBtn" class="btn" style="display:none;margin-top:8px">Download Old Data (JSON)</button>
+          </div>
+        </div>
 
         <h3>Step 2: Upload Template</h3>
         <form id="reconcileTemplateForm">
@@ -175,21 +189,9 @@ async function renderReconcile() {
         <button id="downloadTemplateJsonBtn" class="btn" style="display:none;margin-top:8px">Download Template (JSON)</button>
 
         <div id="matchingArea" style="display:none">
-          <h3>Step 3: Upload to Database</h3>
-          <p>Upload the old data to your database, then match each record with a template and update live.</p>
-          <div style="margin-bottom:16px;padding:12px;background:#f0f7ff;border-radius:6px">
-            <label>Select Database Table:</label>
-            <select id="dbTableSelect" style="padding:4px;margin-right:8px">
-              <option value="">-- Select table --</option>
-            </select>
-            <input type="text" id="customDbTableName" placeholder="Or enter custom table name" style="padding:4px;margin-right:8px"/>
-            <button id="uploadDbBtn" class="btn primary">Upload to DB</button>
-            <div id="uploadMsg" style="margin-top:8px"></div>
-          </div>
-
+          <h3>Step 3: Match Records</h3>
+          <p>For each record, search and select a matching template row. FK updates live in the database.</p>
           <div id="reconcileTableArea" style="display:none">
-            <h3>Step 4: Match Records</h3>
-            <p>For each record, search and select a matching template row. FK updates live in the database.</p>
             <div id="tableContainer" style="overflow-x:auto"></div>
             <div class="controls">
               <button id="downloadBtn" class="btn">Download Reconciled Data</button>
@@ -201,27 +203,88 @@ async function renderReconcile() {
     </section>
   `;
 
+  const dataTableSelect = document.getElementById('dataTableSelect');
+  const loadTableBtn = document.getElementById('loadTableBtn');
+  const loadTableMsg = document.getElementById('loadTableMsg');
   const oldDataForm = document.getElementById('oldDataForm');
+  const oldMsg = document.getElementById('oldMsg');
+  const downloadOldJsonBtn = document.getElementById('downloadOldJsonBtn');
   const reconcileTemplateForm = document.getElementById('reconcileTemplateForm');
   const matchingArea = document.getElementById('matchingArea');
-  const oldMsg = document.getElementById('oldMsg');
   const templateMsg = document.getElementById('templateMsg');
-  const downloadOldJsonBtn = document.getElementById('downloadOldJsonBtn');
   const downloadTemplateJsonBtn = document.getElementById('downloadTemplateJsonBtn');
-  const dbTableSelect = document.getElementById('dbTableSelect');
-  const customDbTableName = document.getElementById('customDbTableName');
-  const uploadDbBtn = document.getElementById('uploadDbBtn');
-  const uploadMsg = document.getElementById('uploadMsg');
   const downloadBtn = document.getElementById('downloadBtn');
   const reconcileTableArea = document.getElementById('reconcileTableArea');
   const saveMsg = document.getElementById('saveMsg');
   const tableContainer = document.getElementById('tableContainer');
-
-  let oldDataLoaded = false;
   let templateLoaded = false;
+  let oldDataLoaded = false;
   let oldRows = [];
   let templateRows = [];
+  let selectedTableName = '';
 
+  // Fetch available tables on load
+  async function loadAvailableTables() {
+    try {
+      console.log('Fetching tables...');
+      const res = await fetch('/api/reconcile/tables');
+      const data = await res.json();
+      console.log('Tables response:', data);
+      const { tables } = data;
+      dataTableSelect.innerHTML = '<option value="">-- Select table --</option>';
+      if (tables && tables.length > 0) {
+        tables.forEach(tbl => {
+          const opt = document.createElement('option');
+          opt.value = tbl;
+          opt.textContent = tbl;
+          dataTableSelect.appendChild(opt);
+        });
+        console.log('Loaded tables:', tables);
+      } else {
+        console.log('No tables found');
+      }
+    } catch (err) {
+      console.error('Error fetching tables:', err);
+    }
+  }
+
+  // Load selected table data from database
+  loadTableBtn.addEventListener('click', async () => {
+    const tableName = dataTableSelect.value;
+    if (!tableName) {
+      loadTableMsg.textContent = 'Please select a table';
+      return;
+    }
+
+    selectedTableName = tableName;
+    loadTableMsg.textContent = 'Loading table data...';
+
+    try {
+      // Fetch table data from database
+      const res = await fetch(`/api/reconcile/table/${tableName}`);
+      const data = await res.json();
+      if (res.ok) {
+        oldRows = data.rows;
+        loadTableMsg.textContent = `Loaded ${oldRows.length} records from table "${tableName}"`;
+        oldDataLoaded = true;
+        if (templateRows.length > 0) {
+          matchingArea.style.display = 'block';
+          reconcileTableArea.style.display = 'none';
+          showReconcileTable(tableName);
+        }
+      } else {
+        loadTableMsg.textContent = data.error || 'Failed to load table';
+      }
+    } catch (err) {
+      console.error(err);
+      loadTableMsg.textContent = 'Error loading table';
+    }
+  });
+
+  // Load tables on render
+  loadAvailableTables();
+
+  // Upload old data handler
   oldDataForm.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const file = document.getElementById('oldDataFile').files[0];
@@ -238,7 +301,12 @@ async function renderReconcile() {
         oldMsg.textContent = `Loaded ${data.rows} old records.`;
         downloadOldJsonBtn.style.display = 'inline-block';
         oldDataLoaded = true;
-        if (templateLoaded) showTableUI();
+        selectedTableName = 'filter'; // Default table name for uploaded data
+        if (templateRows.length > 0) {
+          matchingArea.style.display = 'block';
+          reconcileTableArea.style.display = 'none';
+          showReconcileTable(selectedTableName);
+        }
       } else {
         oldMsg.textContent = data.error || 'Upload failed';
         downloadOldJsonBtn.style.display = 'none';
@@ -265,8 +333,19 @@ async function renderReconcile() {
       if (res.ok) {
         templateMsg.textContent = `Loaded ${data.rows} template rows.`;
         downloadTemplateJsonBtn.style.display = 'inline-block';
-        templateLoaded = true;
-        if (oldDataLoaded) showTableUI();
+        
+        // Fetch template rows
+        const tmplRes = await fetch('/api/reconcile/template-rows');
+        const { rows: fetchedTemplateRows } = await tmplRes.json();
+        templateRows = fetchedTemplateRows;
+        console.log('Fetched template rows:', templateRows.length);
+        
+        // If a table is already loaded, show reconcile UI
+        if (oldDataLoaded && selectedTableName) {
+          matchingArea.style.display = 'block';
+          reconcileTableArea.style.display = 'none';
+          showReconcileTable(selectedTableName);
+        }
       } else {
         templateMsg.textContent = data.error || 'Upload failed';
         downloadTemplateJsonBtn.style.display = 'none';
@@ -285,11 +364,13 @@ async function renderReconcile() {
     const oldRes = await fetch('/api/reconcile/data');
     const { rows: fetchedOldRows } = await oldRes.json();
     oldRows = fetchedOldRows;
+    console.log('Fetched old rows:', oldRows.length);
 
     // Fetch template rows with PK
     const tmplRes = await fetch('/api/reconcile/template-rows');
     const { rows: fetchedTemplateRows } = await tmplRes.json();
     templateRows = fetchedTemplateRows;
+    console.log('Fetched template rows:', templateRows.length);
 
     // Fetch available tables
     try {
@@ -338,9 +419,13 @@ async function renderReconcile() {
   }
 
   async function showReconcileTable(tableName) {
+    // Show the matching area
+    matchingArea.style.display = 'block';
+    reconcileTableArea.style.display = 'block';
+    
     // Build old data table with FK and Match columns
     const oldColumns = oldRows.length > 0 ? Object.keys(oldRows[0]).filter(k => !k.startsWith('_')) : [];
-    const filteredColumns = oldColumns.filter(k => k !== 'FK');
+    const filteredColumns = oldColumns.filter(k => k !== 'FK' && k !== 'id' && k !== 'created_at');
     
     let tableHtml = '<table style="width:100%;border-collapse:collapse"><thead><tr>';
     filteredColumns.forEach(col => {
@@ -386,8 +471,10 @@ async function renderReconcile() {
         }
 
         try {
+          console.log('Searching for:', query, 'with templateRows:', templateRows.length);
           const res = await fetch('/api/reconcile/search?q=' + encodeURIComponent(query));
           const { results } = await res.json();
+          console.log('Search results:', results.length);
 
           let html = '';
           results.forEach((tmplRow, tmplIdx) => {
@@ -413,6 +500,8 @@ async function renderReconcile() {
                 const tbl = fkCell.dataset.table;
                 const oldRowData = oldRows[rowIdx];
                 
+                console.log('Updating FK:', { tmplIdx, pk, tbl, oldRowData });
+                
                 // Call API to update FK in database
                 try {
                   const updateRes = await fetch('/api/reconcile/update-fk', {
@@ -426,6 +515,7 @@ async function renderReconcile() {
                     })
                   });
                   const updateData = await updateRes.json();
+                  console.log('Update response:', updateRes.status, updateData);
                   if (updateRes.ok) {
                     fkCell.textContent = pk;
                     fkCell.style.color = 'green';

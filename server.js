@@ -246,10 +246,29 @@ app.get('/api/reconcile/tables', async (req, res) => {
       ORDER BY table_name
     `);
     const tables = result.rows.map(r => r.table_name);
+    console.log('Available tables:', tables);
     res.json({ tables });
   } catch (err) {
     console.error('Error fetching tables:', err);
     res.status(500).json({ error: 'Failed to fetch tables' });
+  }
+});
+
+// API: fetch data from a specific table
+app.get('/api/reconcile/table/:tableName', async (req, res) => {
+  const { tableName } = req.params;
+  
+  if (!tableName || !/^[a-zA-Z0-9_]+$/.test(tableName)) {
+    return res.status(400).json({ error: 'Invalid table name' });
+  }
+
+  try {
+    const query = `SELECT * FROM "${tableName}" ORDER BY id`;
+    const result = await db.query(query);
+    res.json({ ok: true, rows: result.rows });
+  } catch (err) {
+    console.error(`Error fetching table ${tableName}:`, err);
+    res.status(500).json({ error: 'Failed to fetch table data' });
   }
 });
 
@@ -265,12 +284,13 @@ app.post('/api/reconcile/init-db', express.json(), async (req, res) => {
     // Get column names from first row
     const columns = Object.keys(oldDataStore[0]).filter(k => !k.startsWith('_'));
     
-    // Create table if it doesn't exist with TEXT columns for all data
+    // Create table if it doesn't exist with TEXT columns for all data + FK column for reconciliation
     const columnDefs = columns.map(col => `"${col}" TEXT`).join(', ');
     const createTableQuery = `
       CREATE TABLE IF NOT EXISTS "${tableName}" (
         id SERIAL PRIMARY KEY,
         ${columnDefs},
+        "FK" INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `;
@@ -311,28 +331,53 @@ app.post('/api/reconcile/update-fk', express.json(), async (req, res) => {
 
   try {
     // Find the record by matching old data columns and update FK
-    // Assuming old data columns + FK column exist in the table
-    const oldColumns = Object.keys(oldData).filter(k => !k.startsWith('_'));
+    // Use id column if available for exact row matching
+    const oldId = oldData.id;
     
-    // Build WHERE clause to match the original row with quoted column names
-    let whereClause = '';
-    let whereValues = [];
-    oldColumns.forEach((col, idx) => {
-      if (idx > 0) whereClause += ' AND ';
-      whereClause += `"${col}" = $${idx + 1}`;
-      whereValues.push(oldData[col]);
-    });
-
-    // Add FK value
-    whereValues.push(pkValue);
-    const updateQuery = `UPDATE "${tableName}" SET FK = $${whereValues.length} WHERE ${whereClause} RETURNING *`;
-
-    const result = await db.query(updateQuery, whereValues);
-
-    if (result.rowCount > 0) {
-      res.json({ ok: true, updated: result.rowCount, row: result.rows[0] });
+    if (oldId) {
+      // Match by id column for exact row lookup
+      const updateQuery = `UPDATE "${tableName}" SET "FK" = $1 WHERE id = $2 RETURNING *`;
+      console.log('Update FK by id:', { id: oldId, pkValue, tableName });
+      
+      const result = await db.query(updateQuery, [pkValue, oldId]);
+      
+      if (result.rowCount > 0) {
+        res.json({ ok: true, updated: result.rowCount, row: result.rows[0] });
+      } else {
+        res.status(404).json({ error: 'Record not found' });
+      }
     } else {
-      res.status(404).json({ error: 'Record not found' });
+      // Fall back to matching by data columns
+      const oldColumns = Object.keys(oldData)
+        .filter(k => !k.startsWith('_') && k !== 'id' && k !== 'created_at' && k !== 'FK');
+      
+      console.log('Update FK - oldData keys:', Object.keys(oldData));
+      console.log('Update FK - filtered columns:', oldColumns);
+      
+      // Build WHERE clause to match the original row with quoted column names
+      let whereClause = '';
+      let whereValues = [];
+      oldColumns.forEach((col, idx) => {
+        if (idx > 0) whereClause += ' AND ';
+        whereClause += `"${col}" = $${idx + 1}`;
+        whereValues.push(oldData[col]);
+      });
+
+      // Add FK value
+      whereValues.push(pkValue);
+      const updateQuery = `UPDATE "${tableName}" SET "FK" = $${whereValues.length} WHERE ${whereClause} RETURNING *`;
+
+      console.log('Update query:', updateQuery);
+      console.log('Update values:', whereValues);
+
+      const result = await db.query(updateQuery, whereValues);
+
+      console.log('Update result:', result.rowCount);
+      if (result.rowCount > 0) {
+        res.json({ ok: true, updated: result.rowCount, row: result.rows[0] });
+      } else {
+        res.status(404).json({ error: 'Record not found' });
+      }
     }
   } catch (err) {
     console.error('Update FK error:', err);
