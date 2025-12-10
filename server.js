@@ -253,6 +253,122 @@ app.get('/api/reconcile/tables', async (req, res) => {
   }
 });
 
+// API: upload old data to database (initial insert)
+app.post('/api/reconcile/init-db', express.json(), async (req, res) => {
+  const { tableName } = req.body;
+
+  if (!tableName || !oldDataStore.length) {
+    return res.status(400).json({ error: 'Invalid table name or no data' });
+  }
+
+  try {
+    // Get column names from first row
+    const columns = Object.keys(oldDataStore[0]).filter(k => !k.startsWith('_'));
+    
+    // Create table if it doesn't exist with TEXT columns for all data
+    const columnDefs = columns.map(col => `"${col}" TEXT`).join(', ');
+    const createTableQuery = `
+      CREATE TABLE IF NOT EXISTS "${tableName}" (
+        id SERIAL PRIMARY KEY,
+        ${columnDefs},
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    
+    await db.query(createTableQuery);
+    
+    // Insert all old data rows
+    const columnsStr = columns.map(c => `"${c}"`).join(', ');
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+
+    let insertedCount = 0;
+    for (const row of oldDataStore) {
+      const values = columns.map(col => row[col] ?? null);
+      const query = `INSERT INTO "${tableName}" (${columnsStr}) VALUES (${placeholders}) RETURNING *`;
+      
+      try {
+        const result = await db.query(query, values);
+        insertedCount++;
+      } catch (err) {
+        console.error(`Error inserting row:`, err.message);
+      }
+    }
+
+    res.json({ ok: true, inserted: insertedCount, total: oldDataStore.length });
+  } catch (err) {
+    console.error('Database init error:', err);
+    res.status(500).json({ error: 'Failed to upload to database: ' + err.message });
+  }
+});
+
+// API: update single record's FK (match made)
+app.post('/api/reconcile/update-fk', express.json(), async (req, res) => {
+  const { rowIndex, tableName, pkValue, oldData } = req.body;
+
+  if (!tableName || pkValue === undefined) {
+    return res.status(400).json({ error: 'Invalid table name or PK value' });
+  }
+
+  try {
+    // Find the record by matching old data columns and update FK
+    // Assuming old data columns + FK column exist in the table
+    const oldColumns = Object.keys(oldData).filter(k => !k.startsWith('_'));
+    
+    // Build WHERE clause to match the original row with quoted column names
+    let whereClause = '';
+    let whereValues = [];
+    oldColumns.forEach((col, idx) => {
+      if (idx > 0) whereClause += ' AND ';
+      whereClause += `"${col}" = $${idx + 1}`;
+      whereValues.push(oldData[col]);
+    });
+
+    // Add FK value
+    whereValues.push(pkValue);
+    const updateQuery = `UPDATE "${tableName}" SET FK = $${whereValues.length} WHERE ${whereClause} RETURNING *`;
+
+    const result = await db.query(updateQuery, whereValues);
+
+    if (result.rowCount > 0) {
+      res.json({ ok: true, updated: result.rowCount, row: result.rows[0] });
+    } else {
+      res.status(404).json({ error: 'Record not found' });
+    }
+  } catch (err) {
+    console.error('Update FK error:', err);
+    res.status(500).json({ error: 'Failed to update FK: ' + err.message });
+  }
+});
+
+// API: download old/messy data as JSON
+app.get('/api/reconcile/download-old-json', (req, res) => {
+  if (!oldDataStore.length) {
+    return res.status(400).json({ error: 'No old data loaded' });
+  }
+  
+  const cleanData = oldDataStore.map(row => {
+    const cleaned = { ...row };
+    delete cleaned._rowIndex;
+    delete cleaned._matched;
+    return cleaned;
+  });
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename=old_data.json');
+  res.json(cleanData);
+});
+
+// API: download template data as JSON
+app.get('/api/reconcile/download-template-json', (req, res) => {
+  if (!templateRows.length) {
+    return res.status(400).json({ error: 'No template data loaded' });
+  }
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename=template_data.json');
+  res.json(templateRows);
+});
+
 // All other routes serve index.html so SPA routes work on refresh
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
