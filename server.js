@@ -534,6 +534,72 @@ app.post('/api/reconcile/remove-column', express.json(), async (req, res) => {
   }
 });
 
+// API: Drop a specific table from the database
+app.post('/api/drop-table', express.json(), async (req, res) => {
+  const { tableName } = req.body;
+
+  if (!tableName) {
+    return res.status(400).json({ error: 'Table name is required' });
+  }
+
+  // Validate table name to prevent SQL injection
+  if (!/^[a-zA-Z0-9_]+$/.test(tableName)) {
+    return res.status(400).json({ error: 'Invalid table name' });
+  }
+
+  try {
+    // Drop the table
+    await db.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`);
+    console.log(`Dropped table: ${tableName}`);
+    
+    res.json({ 
+      ok: true, 
+      message: `Table "${tableName}" has been dropped successfully`
+    });
+  } catch (err) {
+    console.error('Error dropping table:', err);
+    res.status(500).json({ error: 'Failed to drop table: ' + err.message });
+  }
+});
+
+// API: Reset database - drop all tables and clear in-memory stores
+app.post('/api/reset-db', express.json(), async (req, res) => {
+  try {
+    // Get all table names from information_schema
+    const result = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+    `);
+
+    const tables = result.rows.map(row => row.table_name);
+    
+    if (tables.length > 0) {
+      // Drop all tables
+      for (const tableName of tables) {
+        await db.query(`DROP TABLE IF EXISTS "${tableName}" CASCADE`);
+        console.log(`Dropped table: ${tableName}`);
+      }
+    }
+
+    // Clear in-memory stores
+    dataStore = [];
+    templateData = null;
+    oldDataStore = [];
+    templateRows = [];
+
+    console.log('Database reset complete - all tables dropped and in-memory stores cleared');
+    res.json({ 
+      ok: true, 
+      message: `Reset complete: dropped ${tables.length} table(s)`,
+      droppedTables: tables
+    });
+  } catch (err) {
+    console.error('Error resetting database:', err);
+    res.status(500).json({ error: 'Failed to reset database: ' + err.message });
+  }
+});
+
 // All other routes serve index.html so SPA routes work on refresh
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

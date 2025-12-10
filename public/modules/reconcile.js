@@ -51,6 +51,18 @@ export async function renderReconcile() {
           <div id="reconcileTableArea" style="display:none">
             <div id="tableContainer" style="overflow-x:auto"></div>
             
+            <h4 style="margin-top:24px">Save to Database</h4>
+            <div style="padding:12px;background:#f0fff4;border:1px solid #28a745;border-radius:6px;margin-bottom:16px">
+              <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+                <div>
+                  <label><strong>Table Name:</strong></label>
+                  <input type="text" id="dbTableName" placeholder="e.g., products" style="padding:8px;border:1px solid #ddd;border-radius:4px;width:200px"/>
+                </div>
+                <button id="saveToDbBtn" class="btn" style="background:#28a745;color:#fff">💾 Save to Database</button>
+                <div id="uploadMsg" style="margin-left:8px;font-weight:bold"></div>
+              </div>
+            </div>
+            
             <h4 style="margin-top:24px">Column Management</h4>
             <div style="display:flex;gap:8px;margin-bottom:16px;align-items:flex-end;flex-wrap:wrap">
               <div>
@@ -106,6 +118,9 @@ export async function renderReconcile() {
   const matchingArea = document.getElementById('matchingArea');
   const reconcileTableArea = document.getElementById('reconcileTableArea');
   const tableContainer = document.getElementById('tableContainer');
+  const dbTableName = document.getElementById('dbTableName');
+  const saveToDbBtn = document.getElementById('saveToDbBtn');
+  const uploadMsg = document.getElementById('uploadMsg');
   const downloadBtn = document.getElementById('downloadBtn');
   const saveMsg = document.getElementById('saveMsg');
   const newColumnName = document.getElementById('newColumnName');
@@ -515,6 +530,53 @@ export async function renderReconcile() {
     });
   }
 
+  // Save uploaded data to database
+  saveToDbBtn.addEventListener('click', async () => {
+    if (!oldRows.length) {
+      uploadMsg.textContent = 'No data loaded to save';
+      uploadMsg.style.color = 'red';
+      return;
+    }
+
+    const tableName = dbTableName.value.trim();
+    if (!tableName) {
+      uploadMsg.textContent = 'Please enter a table name';
+      uploadMsg.style.color = 'red';
+      return;
+    }
+
+    uploadMsg.textContent = 'Creating table and inserting data...';
+    uploadMsg.style.color = '#666';
+
+    try {
+      const res = await fetch('/api/reconcile/init-db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableName })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        uploadMsg.textContent = `✓ Saved ${data.inserted}/${data.total} records to table "${tableName}"`;
+        uploadMsg.style.color = 'green';
+        selectedTableName = tableName;
+        loadedTable = tableName;
+        
+        // Reload table to show it's now in the database
+        setTimeout(() => {
+          showReconcileTable(tableName);
+        }, 1500);
+      } else {
+        uploadMsg.textContent = `✗ Error: ${data.error}`;
+        uploadMsg.style.color = 'red';
+      }
+    } catch (err) {
+      console.error('Save to DB error:', err);
+      uploadMsg.textContent = `✗ Error: ${err.message}`;
+      uploadMsg.style.color = 'red';
+    }
+  });
+
   function setupColumnHandlers() {
     addColumnBtn.addEventListener('click', async () => {
       const colName = newColumnName.value.trim();
@@ -656,6 +718,10 @@ export async function renderReconcile() {
       });
       const data = await res.json();
       if (res.ok) {
+        // Use window.XLSX (loaded from CDN)
+        const XLSX = window.XLSX;
+        if (!XLSX) throw new Error('XLSX library not loaded');
+        
         const ws = XLSX.utils.json_to_sheet(data.data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Reconciled');

@@ -17,6 +17,7 @@ export async function renderTableExport() {
           </div>
           <button id="loadExportTableBtn" class="btn primary">Load Table</button>
           <button id="exportTableBtn" class="btn" style="background:#28a745;color:#fff;display:none">📥 Export to Excel</button>
+          <button id="dropTableBtn" class="btn" style="background:#dc3545;color:#fff;display:none">🗑️ Drop Table</button>
         </div>
         <div id="exportMsg" style="margin-top:8px;font-weight:bold"></div>
       </div>
@@ -54,6 +55,8 @@ export async function renderTableExport() {
   }
 
   // Load selected table data
+  const dropTableBtn = document.getElementById('dropTableBtn');
+  
   loadExportTableBtn.addEventListener('click', async () => {
     const tableName = exportTableSelect.value;
     if (!tableName) {
@@ -73,6 +76,7 @@ export async function renderTableExport() {
         currentTableData = data.rows || [];
         currentTableName = tableName;
         exportTableBtn.style.display = 'inline-block';
+        dropTableBtn.style.display = 'inline-block';
         tableArea.innerHTML = buildTable(currentTableData);
         exportMsg.textContent = `✓ Loaded ${currentTableData.length} rows from "${tableName}"`;
         exportMsg.style.color = 'green';
@@ -99,7 +103,10 @@ export async function renderTableExport() {
     exportMsg.style.color = '#666';
 
     try {
-      // Create Excel file from table data
+      // Create Excel file from table data using window.XLSX (global from CDN)
+      const XLSX = window.XLSX;
+      if (!XLSX) throw new Error('XLSX library not loaded');
+      
       const ws = XLSX.utils.json_to_sheet(currentTableData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, currentTableName.substring(0, 31)); // Sheet name max 31 chars
@@ -115,6 +122,55 @@ export async function renderTableExport() {
     } catch (err) {
       console.error('Export error:', err);
       exportMsg.textContent = 'Export failed: ' + err.message;
+      exportMsg.style.color = 'red';
+    }
+  });
+
+  // Drop selected table
+  dropTableBtn.addEventListener('click', async () => {
+    if (!currentTableName) {
+      exportMsg.textContent = 'No table selected';
+      exportMsg.style.color = 'red';
+      return;
+    }
+
+    const confirmed = confirm(
+      `⚠️ WARNING: This will DELETE the entire table "${currentTableName}" and all its data!\n\n` +
+      'This cannot be undone. Are you sure?'
+    );
+    
+    if (!confirmed) return;
+
+    exportMsg.textContent = 'Dropping table...';
+    exportMsg.style.color = '#666';
+
+    try {
+      const res = await fetch('/api/drop-table', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tableName: currentTableName })
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        exportMsg.textContent = `✓ Table "${currentTableName}" dropped successfully!`;
+        exportMsg.style.color = 'green';
+        dropTableBtn.style.display = 'none';
+        exportTableBtn.style.display = 'none';
+        tableArea.innerHTML = '<p>Table has been deleted. Select another table to continue.</p>';
+        exportTableSelect.value = '';
+        
+        // Reload available tables
+        setTimeout(() => {
+          loadAvailableTables();
+        }, 1500);
+      } else {
+        exportMsg.textContent = `✗ Error: ${data.error}`;
+        exportMsg.style.color = 'red';
+      }
+    } catch (err) {
+      console.error('Drop table error:', err);
+      exportMsg.textContent = `✗ Drop failed: ${err.message}`;
       exportMsg.style.color = 'red';
     }
   });
